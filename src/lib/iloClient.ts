@@ -65,8 +65,21 @@ const withSshConnection = async (callback: (ssh: NodeSSH) => Promise<void>) => {
         host: iloHost,
         username: process.env.ILO_USERNAME,
         password: process.env.ILO_PASSWORD,
+        readyTimeout: 15000,
         algorithms: {
-            kex: ["diffie-hellman-group14-sha1"],
+            kex: [
+                "diffie-hellman-group14-sha1",
+                "diffie-hellman-group1-sha1",
+            ],
+            serverHostKey: ["ssh-rsa", "ssh-dss"],
+            cipher: [
+                "aes128-cbc",
+                "aes256-cbc",
+                "3des-cbc",
+                "aes128-ctr",
+                "aes256-ctr",
+            ],
+            hmac: ["hmac-sha1", "hmac-md5", "hmac-sha2-256"],
         },
     });
 
