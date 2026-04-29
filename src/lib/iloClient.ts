@@ -79,7 +79,9 @@ const sshExec = (command: string): Promise<string> => {
             ],
             { timeout: 15000 },
             (error, stdout, stderr) => {
-                if (error) {
+                // iLO's SSH server returns non-zero exit codes even on success,
+                // so only treat connection/timeout errors as failures
+                if (error && !stdout && stderr && !stderr.includes("Warning:")) {
                     reject(new Error(`SSH command failed: ${stderr || error.message}`));
                     return;
                 }
