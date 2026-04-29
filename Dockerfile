@@ -11,6 +11,7 @@ COPY --from=deps /app/node_modules ./node_modules
 RUN yarn build
 
 FROM node:alpine AS runner
+RUN apk add --no-cache openssh-client sshpass
 WORKDIR /app
 
 ARG APP_ENV=production

@@ -1,6 +1,6 @@
 import base64 from "base-64";
 import { Agent as UndiciAgent } from "undici";
-import { NodeSSH } from "node-ssh";
+import { execFile } from "child_process";
 import { changeFanSpeedSchema, ChangeFanSpeedInput } from "../schemas/changeFanSpeed";
 import type { FanObject } from "../types/Fan";
 
@@ -56,44 +56,42 @@ export const fetchFans = async (): Promise<FanObject[]> => {
     return payload.Fans ?? [];
 };
 
-const withSshConnection = async (callback: (ssh: NodeSSH) => Promise<void>) => {
+const sshExec = (command: string): Promise<string> => {
     ensureEnv();
-    const iloHost = getIloHost();
-    const ssh = new NodeSSH();
+    const host = getIloHost();
+    const user = process.env.ILO_USERNAME!;
+    const pass = process.env.ILO_PASSWORD!;
 
-    await ssh.connect({
-        host: iloHost,
-        username: process.env.ILO_USERNAME,
-        password: process.env.ILO_PASSWORD,
-        readyTimeout: 15000,
-        algorithms: {
-            kex: [
-                "diffie-hellman-group14-sha1",
-                "diffie-hellman-group1-sha1",
+    return new Promise((resolve, reject) => {
+        execFile(
+            "sshpass",
+            [
+                "-p", pass,
+                "ssh",
+                "-o", "KexAlgorithms=diffie-hellman-group14-sha1",
+                "-o", "HostKeyAlgorithms=ssh-rsa",
+                "-o", "Ciphers=aes128-cbc",
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "ConnectTimeout=10",
+                "-o", "PubkeyAuthentication=no",
+                `${user}@${host}`,
+                command,
             ],
-            serverHostKey: ["ssh-rsa", "ssh-dss"],
-            cipher: [
-                "aes128-cbc",
-                "aes256-cbc",
-                "3des-cbc",
-                "aes128-ctr",
-                "aes256-ctr",
-            ],
-            hmac: ["hmac-sha1", "hmac-md5", "hmac-sha2-256"],
-        },
+            { timeout: 15000 },
+            (error, stdout, stderr) => {
+                if (error) {
+                    reject(new Error(`SSH command failed: ${stderr || error.message}`));
+                    return;
+                }
+                resolve(stdout);
+            }
+        );
     });
-
-    try {
-        await callback(ssh);
-    } finally {
-        ssh.dispose();
-    }
 };
 
-export const unlockFans = async (): Promise<void> =>
-    withSshConnection(async (ssh) => {
-        await ssh.execCommand("fan p global unlock");
-    });
+export const unlockFans = async (): Promise<void> => {
+    await sshExec("fan p global unlock");
+};
 
 export const setFanSpeeds = async (payload: ChangeFanSpeedInput): Promise<void> => {
     const validated = await changeFanSpeedSchema.validate(payload, {
@@ -101,10 +99,8 @@ export const setFanSpeeds = async (payload: ChangeFanSpeedInput): Promise<void> 
         stripUnknown: true,
     });
 
-    await withSshConnection(async (ssh) => {
-        for (let i = 0; i < validated.fans.length; i++) {
-            const speed = Math.round((validated.fans[i] / 100) * 255);
-            await ssh.execCommand(`fan p ${i} lock ${speed}`);
-        }
-    });
+    for (let i = 0; i < validated.fans.length; i++) {
+        const speed = Math.round((validated.fans[i] / 100) * 255);
+        await sshExec(`fan p ${i} lock ${speed}`);
+    }
 };
