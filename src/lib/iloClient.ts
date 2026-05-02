@@ -101,10 +101,16 @@ export const setFanSpeeds = async (payload: ChangeFanSpeedInput): Promise<void> 
         stripUnknown: true,
     });
 
-    await Promise.all(
-        validated.fans.map((pct, i) => {
-            const speed = Math.round((pct / 100) * 255);
-            return sshExec(`fan p ${i} lock ${speed}`);
-        })
-    );
+    // iLO SSH can't handle many concurrent connections — batch in pairs
+    const BATCH_SIZE = 2;
+    for (let i = 0; i < validated.fans.length; i += BATCH_SIZE) {
+        const batch = validated.fans.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+            batch.map((pct, j) => {
+                const idx = i + j;
+                const speed = Math.round((pct / 100) * 255);
+                return sshExec(`fan p ${idx} lock ${speed}`);
+            })
+        );
+    }
 };
