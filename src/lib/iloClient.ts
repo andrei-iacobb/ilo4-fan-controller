@@ -101,8 +101,10 @@ export const setFanSpeeds = async (payload: ChangeFanSpeedInput): Promise<void> 
         stripUnknown: true,
     });
 
-    for (let i = 0; i < validated.fans.length; i++) {
-        const speed = Math.round((validated.fans[i] / 100) * 255);
-        await sshExec(`fan p ${i} lock ${speed}`);
-    }
+    await Promise.all(
+        validated.fans.map((pct, i) => {
+            const speed = Math.round((pct / 100) * 255);
+            return sshExec(`fan p ${i} lock ${speed}`);
+        })
+    );
 };
