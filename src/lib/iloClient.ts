@@ -1,14 +1,8 @@
-import base64 from "base-64";
-import { Agent as UndiciAgent } from "undici";
 import { execFile } from "child_process";
 import { changeFanSpeedSchema, ChangeFanSpeedInput } from "../schemas/changeFanSpeed";
 import type { FanObject } from "../types/Fan";
 
-const httpsDispatcher = new UndiciAgent({
-    connect: {
-        rejectUnauthorized: false,
-    },
-});
+const PROMETHEUS_URL = process.env.PROMETHEUS_URL || "http://prometheus-kube-prometheus-prometheus.monitoring:9090";
 
 const getIloHost = (): string =>
     (process.env.ILO_HOST ?? "").replace(/^https?:\/\//, "");
@@ -27,33 +21,47 @@ const ensureEnv = () => {
     }
 };
 
-type IloThermalPayload = {
-    Fans?: FanObject[];
+type PromResult = {
+    metric: { name: string; host: string };
+    value: [number, string];
 };
 
 export const fetchFans = async (): Promise<FanObject[]> => {
     ensureEnv();
+    const host = getIloHost();
 
-    const requestInit: RequestInit & { dispatcher: UndiciAgent } = {
-        headers: {
-            Authorization: `Basic ${base64.encode(
-                `${process.env.ILO_USERNAME}:${process.env.ILO_PASSWORD}`
-            )}`,
-        },
-        dispatcher: httpsDispatcher,
-    };
-
+    // Query Prometheus for fan data (iLO4's HTTPS/TLS is too old for any modern client)
+    const query = `last_over_time(ilo_chassis_fan_current_percent{host="${host}"}[24h])`;
     const response = await fetch(
-        `https://${process.env.ILO_HOST}/redfish/v1/chassis/1/Thermal`,
-        requestInit
+        `${PROMETHEUS_URL}/api/v1/query?query=${encodeURIComponent(query)}`
     );
 
     if (!response.ok) {
-        throw new Error(`Unable to fetch fan data (${response.status})`);
+        throw new Error(`Prometheus query failed (${response.status})`);
     }
 
-    const payload = (await response.json()) as IloThermalPayload;
-    return payload.Fans ?? [];
+    const data = (await response.json()) as { data: { result: PromResult[] } };
+    const results = data.data.result;
+
+    if (results.length === 0) {
+        throw new Error("No fan data available from Prometheus");
+    }
+
+    return results
+        .sort((a, b) => a.metric.name.localeCompare(b.metric.name))
+        .map((r) => ({
+            CurrentReading: parseInt(r.value[1], 10),
+            FanName: r.metric.name,
+            Status: { Health: "OK", State: "Enabled" },
+            Units: "Percent",
+            Oem: {
+                Hp: {
+                    "@odata.type": "#HpServerFan.1.0.0.HpServerFan",
+                    Location: "System",
+                    Type: "HpServerFan.1.0.0",
+                },
+            },
+        }));
 };
 
 const sshExec = (command: string, timeout = 15000): Promise<string> => {

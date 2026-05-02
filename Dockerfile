@@ -9,8 +9,7 @@ COPY . .
 COPY --from=deps /app/node_modules ./node_modules
 RUN yarn build
 
-# Node 16 ships OpenSSL 1.1.1 (bundled) which supports TLS 1.0 for iLO4
-FROM node:16-bullseye-slim AS runner
+FROM node:20-slim AS runner
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-client sshpass ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -22,8 +21,7 @@ ARG PORT=3000
 
 ENV APP_ENV=${APP_ENV} \
     NODE_ENV=${NODE_ENV} \
-    PORT=${PORT} \
-    NODE_TLS_REJECT_UNAUTHORIZED=0
+    PORT=${PORT}
 
 RUN addgroup --gid 1001 nodejs
 RUN adduser --disabled-password --gecos "" --uid 1001 --ingroup nodejs nextjs
