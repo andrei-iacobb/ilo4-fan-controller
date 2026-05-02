@@ -56,7 +56,7 @@ export const fetchFans = async (): Promise<FanObject[]> => {
     return payload.Fans ?? [];
 };
 
-const sshExec = (command: string): Promise<string> => {
+const sshExec = (command: string, timeout = 15000): Promise<string> => {
     ensureEnv();
     const host = getIloHost();
     const user = process.env.ILO_USERNAME!;
@@ -68,6 +68,7 @@ const sshExec = (command: string): Promise<string> => {
             [
                 "-p", pass,
                 "ssh",
+                "-T",
                 "-o", "KexAlgorithms=diffie-hellman-group14-sha1",
                 "-o", "HostKeyAlgorithms=ssh-rsa",
                 "-o", "Ciphers=aes128-cbc",
@@ -77,7 +78,7 @@ const sshExec = (command: string): Promise<string> => {
                 `${user}@${host}`,
                 command,
             ],
-            { timeout: 15000 },
+            { timeout },
             (error, stdout, stderr) => {
                 // iLO's SSH server returns non-zero exit codes even on success,
                 // so only treat connection/timeout errors as failures
@@ -101,16 +102,13 @@ export const setFanSpeeds = async (payload: ChangeFanSpeedInput): Promise<void> 
         stripUnknown: true,
     });
 
-    // iLO SSH can't handle many concurrent connections — batch in pairs
-    const BATCH_SIZE = 2;
-    for (let i = 0; i < validated.fans.length; i += BATCH_SIZE) {
-        const batch = validated.fans.slice(i, i + BATCH_SIZE);
-        await Promise.all(
-            batch.map((pct, j) => {
-                const idx = i + j;
-                const speed = Math.round((pct / 100) * 255);
-                return sshExec(`fan p ${idx} lock ${speed}`);
-            })
-        );
-    }
+    // Send all fan commands in a single SSH session to avoid
+    // multiple slow connections to iLO's mpSSH server
+    const commands = validated.fans
+        .map((pct, i) => {
+            const speed = Math.round((pct / 100) * 255);
+            return `fan p ${i} lock ${speed}`;
+        })
+        .join("\n");
+    await sshExec(commands, 30000);
 };
