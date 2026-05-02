@@ -29,12 +29,13 @@ export const fetchFans = async (): Promise<FanObject[]> => {
     const user = process.env.ILO_USERNAME!;
     const pass = process.env.ILO_PASSWORD!;
 
-    // Use curl because iLO4's TLS is too old for Node.js/OpenSSL 3.x
+    // Use curl with --tls-max 1.0 for iLO4's ancient TLS
     const stdout = await new Promise<string>((resolve, reject) => {
         execFile(
             "curl",
             [
                 "-s", "-k",
+                "--tlsv1.0", "--tls-max", "1.0",
                 "-u", `${user}:${pass}`,
                 `https://${host}/redfish/v1/chassis/1/Thermal`,
             ],

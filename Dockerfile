@@ -1,17 +1,18 @@
-FROM node:alpine AS deps
-RUN apk add --no-cache libc6-compat
+FROM node:20-slim AS deps
 WORKDIR /app
 COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile
 
-FROM node:alpine AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 COPY . .
 COPY --from=deps /app/node_modules ./node_modules
 RUN yarn build
 
-FROM node:alpine AS runner
-RUN apk add --no-cache openssh-client sshpass curl
+FROM node:20-slim AS runner
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-client sshpass curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 ARG APP_ENV=production
@@ -20,10 +21,11 @@ ARG PORT=3000
 
 ENV APP_ENV=${APP_ENV} \
     NODE_ENV=${NODE_ENV} \
-    PORT=${PORT}
+    PORT=${PORT} \
+    NODE_TLS_REJECT_UNAUTHORIZED=0
 
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nextjs -u 1001
+RUN addgroup --gid 1001 nodejs
+RUN adduser --disabled-password --gecos "" --uid 1001 --ingroup nodejs nextjs
 
 RUN mkdir -p /app/.next/cache/images && chown nextjs:nodejs /app/.next/cache/images
 VOLUME /app/.next/cache/images
