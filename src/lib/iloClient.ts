@@ -1,6 +1,14 @@
+import base64 from "base-64";
+import { Agent as UndiciAgent } from "undici";
 import { execFile } from "child_process";
 import { changeFanSpeedSchema, ChangeFanSpeedInput } from "../schemas/changeFanSpeed";
 import type { FanObject } from "../types/Fan";
+
+const httpsDispatcher = new UndiciAgent({
+    connect: {
+        rejectUnauthorized: false,
+    },
+});
 
 const getIloHost = (): string =>
     (process.env.ILO_HOST ?? "").replace(/^https?:\/\//, "");
@@ -25,32 +33,26 @@ type IloThermalPayload = {
 
 export const fetchFans = async (): Promise<FanObject[]> => {
     ensureEnv();
-    const host = getIloHost();
-    const user = process.env.ILO_USERNAME!;
-    const pass = process.env.ILO_PASSWORD!;
 
-    // Use curl with --tls-max 1.0 for iLO4's ancient TLS
-    const stdout = await new Promise<string>((resolve, reject) => {
-        execFile(
-            "curl",
-            [
-                "-s", "-k",
-                "--tlsv1.0", "--tls-max", "1.0",
-                "-u", `${user}:${pass}`,
-                `https://${host}/redfish/v1/chassis/1/Thermal`,
-            ],
-            { timeout: 15000 },
-            (error, stdout, stderr) => {
-                if (error && !stdout) {
-                    reject(new Error(`Redfish fetch failed: ${stderr || error.message}`));
-                    return;
-                }
-                resolve(stdout);
-            }
-        );
-    });
+    const requestInit: RequestInit & { dispatcher: UndiciAgent } = {
+        headers: {
+            Authorization: `Basic ${base64.encode(
+                `${process.env.ILO_USERNAME}:${process.env.ILO_PASSWORD}`
+            )}`,
+        },
+        dispatcher: httpsDispatcher,
+    };
 
-    const payload = JSON.parse(stdout) as IloThermalPayload;
+    const response = await fetch(
+        `https://${process.env.ILO_HOST}/redfish/v1/chassis/1/Thermal`,
+        requestInit
+    );
+
+    if (!response.ok) {
+        throw new Error(`Unable to fetch fan data (${response.status})`);
+    }
+
+    const payload = (await response.json()) as IloThermalPayload;
     return payload.Fans ?? [];
 };
 
