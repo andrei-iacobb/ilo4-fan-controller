@@ -64,16 +64,20 @@ export const fetchFans = async (): Promise<FanObject[]> => {
         }));
 };
 
-const sshExec = (command: string, timeout = 15000): Promise<string> => {
+const sshExec = (command: string): Promise<string> => {
     ensureEnv();
     const host = getIloHost();
     const user = process.env.ILO_USERNAME!;
     const pass = process.env.ILO_PASSWORD!;
 
     return new Promise((resolve, reject) => {
+        // Use `timeout` to kill the SSH session after 5s — iLO's mpSSH never
+        // closes the connection, but commands execute instantly on connect.
         execFile(
-            "sshpass",
+            "timeout",
             [
+                "5",
+                "sshpass",
                 "-p", pass,
                 "ssh",
                 "-T",
@@ -81,15 +85,15 @@ const sshExec = (command: string, timeout = 15000): Promise<string> => {
                 "-o", "HostKeyAlgorithms=ssh-rsa",
                 "-o", "Ciphers=aes128-cbc",
                 "-o", "StrictHostKeyChecking=no",
-                "-o", "ConnectTimeout=10",
+                "-o", "ConnectTimeout=3",
                 "-o", "PubkeyAuthentication=no",
                 `${user}@${host}`,
                 command,
             ],
-            { timeout },
+            { timeout: 10000 },
             (error, stdout, stderr) => {
-                // iLO's SSH server returns non-zero exit codes even on success,
-                // so only treat connection/timeout errors as failures
+                // iLO's SSH returns non-zero exit codes and `timeout` returns 124
+                // — only treat as failure if we got no output and have real errors
                 if (error && !stdout && stderr && !stderr.includes("Warning:")) {
                     reject(new Error(`SSH command failed: ${stderr || error.message}`));
                     return;
@@ -118,5 +122,5 @@ export const setFanSpeeds = async (payload: ChangeFanSpeedInput): Promise<void> 
             return `fan p ${i} lock ${speed}`;
         })
         .join("\n");
-    await sshExec(commands, 30000);
+    await sshExec(commands);
 };
