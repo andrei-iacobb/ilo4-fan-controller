@@ -9,8 +9,8 @@ COPY . .
 COPY --from=deps /app/node_modules ./node_modules
 RUN yarn build
 
-# Bullseye has OpenSSL 1.1.1 which supports TLS 1.0 needed by iLO4
-FROM node:18-bullseye-slim AS runner
+# Node 16 ships OpenSSL 1.1.1 (bundled) which supports TLS 1.0 for iLO4
+FROM node:16-bullseye-slim AS runner
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-client sshpass ca-certificates \
     && rm -rf /var/lib/apt/lists/*
